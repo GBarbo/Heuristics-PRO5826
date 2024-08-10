@@ -52,7 +52,12 @@ def cummulative_time(jobs, sequence, sequence_index):
 
     return current_time
 
-def total_cost(jobs, sequence, common_due_date):
+# Early and Late subsets calculation
+
+def early_late_division(jobs, sequence, common_due_date):
+    # Require: list of jobs, sequence and common due date
+    # Ensure: subsets A and B of early and late jobs, respectively, so that the slack is minimum at the start
+
     A = []  # Early jobs
 
     current_time = 0
@@ -65,6 +70,20 @@ def total_cost(jobs, sequence, common_due_date):
     
     current_index = sequence.index(x)
     B = [jobs[x] for x in sequence[current_index:]]  # Late jobs
+
+    A = [jobs.index(job) for job in A]
+    B = [jobs.index(job) for job in B]
+
+    return A, B        
+
+# Total cost calculation
+
+def total_cost(jobs, sequence, common_due_date):
+
+    A, B = early_late_division(jobs, sequence, common_due_date)
+
+    A = [jobs[x] for x in A]
+    B = [jobs[x] for x in B]
 
     # Cost B
     cummulative_time_B = 0
@@ -118,11 +137,78 @@ def swap_job(sequence, from_index, to_index):
     return sequence
 
 # ==================================================================
+#                      V-SHAPE NEIGHBORHOOD
+# ==================================================================
+
+def vshape_neighborhood(jobs, sequence, common_due_date, j_index, threshold, insert):
+    # Require: jobs, sequence, common due date, index of the job j (in the sequence), threshold
+    # Ensure: v-shape abiding neighborhood for local search  
+
+    A, B = early_late_division(jobs, sequence, common_due_date)
+    neighborhood = []
+
+    j = sequence[j_index]
+
+    # Find out whether j belongs to A or B
+    j_is_early = True
+    for i in B:
+        if j == i: j_is_early = False
+
+    k = 0
+    if j_is_early:  # j is an early job
+        late_eval_j = jobs[j].processing_time / jobs[j].weight_t        # pj/bj
+        for i in B: 
+            late_eval_i = jobs[i].processing_time / jobs[i].weight_t    # pi/bi
+            if late_eval_i <= late_eval_j:
+                neighborhood.append(i)
+                k += 1
+                if k == threshold: break
+            else:
+                break   # next jobs won't obey the condition anyway
+
+        if not insert:  # swap v-shape fixing procedure (swap candidates must have p/a within swapped space)
+            if j_index == 0: upper_early_eval = 999
+            else: upper_early_eval = jobs[sequence[j_index - 1]].processing_time / jobs[sequence[j_index - 1]].weight_e 
+            if j_index == len(A) - 1: lower_early_eval = 0
+            else: lower_early_eval = jobs[sequence[j_index + 1]].processing_time / jobs[sequence[j_index + 1]].weight_e 
+            rm_list = []
+            for i in neighborhood:
+                early_eval_i = jobs[i].processing_time / jobs[i].weight_e
+                if not (early_eval_i >= lower_early_eval and early_eval_i <= upper_early_eval):
+                    rm_list.append(i)
+            for i in rm_list: neighborhood.remove(i)
+        
+    else:   # j is a late job
+        early_eval_j = jobs[j].processing_time / jobs[j].weight_e         # pj/aj
+        for i in reversed(A):
+            early_eval_i = jobs[i].processing_time / jobs[i].weight_e     # pi/ai
+            if early_eval_i <= early_eval_j:
+                neighborhood.append(i)
+                k += 1
+                if k == threshold: break
+            else:
+                break   # next jobs won't obey the condition anyway
+
+        if not insert:  # swap v-shape fixing procedure (swap candidates must have p/b within swapped space)
+            if j_index == len(sequence) - 1: upper_early_eval = 999
+            else: upper_early_eval = jobs[sequence[j_index + 1]].processing_time / jobs[sequence[j_index + 1]].weight_t 
+            if j_index == len(A): lower_early_eval = 0
+            else: lower_early_eval = jobs[sequence[j_index - 1]].processing_time / jobs[sequence[j_index - 1]].weight_t 
+            rm_list = []
+            for i in neighborhood:
+                early_eval_i = jobs[i].processing_time / jobs[i].weight_t
+                if not (early_eval_i >= lower_early_eval and early_eval_i <= upper_early_eval):
+                    rm_list.append(i)
+            for i in rm_list: neighborhood.remove(i)
+            
+    return neighborhood
+
+# ==================================================================
 #                      EVALUATION PROCEDURE
 # ==================================================================
 
-def evaluation_procedure(jobs, sequence, common_due_date, j, insert):
-    # Require: list of jobs, sequence to be explored, index of the job j to evaluate swaps and insertions possible within the sequence, insert (True -> insert; False -> swap)
+def evaluation_procedure(jobs, sequence, neighborhood, common_due_date, j, insert):
+    # Require: list of jobs, sequence to be explored, index of the job j (in the sequence) to evaluate swaps and insertions possible within the sequence, insert (True -> insert; False -> swap)
     # Ensure: minimum cost of objective function, operation used (swap or insertion), index of the job swapped with or inserted before
     
     #print("evaluation", sequence, j, insert)
@@ -135,9 +221,8 @@ def evaluation_procedure(jobs, sequence, common_due_date, j, insert):
     Pj = penalty(jobs[sequence[j]], completion_time(jobs, sequence, first_job_time, j), common_due_date)
 
     for i in range(len(sequence)):
-        if i != j: # Avoid auto-insertion/auto-swap
-        
-            if insert and abs(i - j) != 1:   # INSERTION and avoid swap with the next/previous as an insertion
+        if sequence[i] in neighborhood:
+            if insert:   # INSERTION
                 Pi = penalty(jobs[sequence[i]], completion_time(jobs, sequence, first_job_time, i), common_due_date)
                 new_sequence = sequence[:]
                 new_sequence = insert_job(new_sequence, j, i)
@@ -153,8 +238,8 @@ def evaluation_procedure(jobs, sequence, common_due_date, j, insert):
                 # f' = f + (Pi' - Pi) + (Pj' - Pj)
                 f_new = f + (Pi_new - Pi) + (Pj_new - Pj)
                 F.append([f_new, "i", i])     # (new objective function, i for insertion, index to insert before)
-    
-            elif not insert:    # SWAP
+
+            else:    # SWAP
                 new_sequence = sequence[:]
                 new_sequence = swap_job(new_sequence, j, i)
 
@@ -167,7 +252,7 @@ def evaluation_procedure(jobs, sequence, common_due_date, j, insert):
 
                 new_first_job_time = total_cost(jobs, new_sequence, common_due_date)[1]
 
-            # f' = f + sum^j_{l=i}(Pl'-Pl)
+                # f' = f + sum^j_{l=i}(Pl'-Pl)
                 sum_penalty = 0
                 while l <= k:
                     Pi = penalty(jobs[sequence[l]], completion_time(jobs, sequence, first_job_time, l), common_due_date)
@@ -176,8 +261,12 @@ def evaluation_procedure(jobs, sequence, common_due_date, j, insert):
                     l += 1
                 f_new = f + sum_penalty
                 F.append([f_new, "s", i])     # (new objective function, s for swap, index to swap with)
-
-    return min(F, key=lambda x: x[0])
+    try:
+        return min(F, key=lambda x: x[0])
+    except:
+        if insert: msg = "insert"
+        else: msg = "swap"
+        print(f'No {msg} available')
 
 # ==================================================================
 #                      LOCAL SEARCH
@@ -187,37 +276,21 @@ def local_search(jobs, sequence, common_due_date, job_index, threshold_swaps, th
     # Require: list of jobs, sequence, index of the job in the sequence, number of jobs before and after for swaps and inserts neighborhood, probability of choosing insert 
     # Ensure: sequence with least weighted tardiness/earliness within the neighborhood after all swaps or insertions are made around the chosen job
 
-    original_sequence = sequence[:]
+    insert = random.random() < insert_probability
 
-    insert = random.random() >= insert_probability
-    if insert:  # Insertion move
-        job = sequence[job_index]
-        start = max(job_index - threshold_inserts, 0)
-        end = min(job_index + threshold_inserts + 1, len(sequence))
-        sublist = sequence[start:end]
+    if insert: threshold = threshold_inserts
+    else: threshold = threshold_swaps
+    neighborhood = vshape_neighborhood(jobs, sequence, common_due_date, job_index, threshold, insert)
 
-        sublist_job_index = sublist.index(job)
-        move = evaluation_procedure(jobs, sublist, common_due_date, sublist_job_index, True)
-        sublist = insert_job(sublist, sublist_job_index, move[2])
-
-        sequence[start:end] = sublist
+    if insert and len(neighborhood) > 0:  # Insertion move
+        move = evaluation_procedure(jobs, sequence, neighborhood, common_due_date, job_index, True)
+        sequence = insert_job(sequence, job_index, sequence.index(move[2]))
     
-    else:   # Swap move
-        job = sequence[job_index]
-        start = max(job_index - threshold_swaps, 0)
-        end = min(job_index + threshold_swaps + 1, len(sequence))
-        sublist = sequence[start:end]
-
-        sublist_job_index = sublist.index(job)
-        move = evaluation_procedure(jobs, sublist, common_due_date, sublist_job_index, False)
-        sublist = swap_job(sublist, sublist_job_index, move[2])
-
-        sequence[start:end] = sublist
+    elif not insert and len(neighborhood) > 0:   # Swap move
+        move = evaluation_procedure(jobs, sequence, neighborhood, common_due_date, job_index, False)
+        sequence = swap_job(sequence, job_index, sequence.index(move[2]))
     
-    if total_cost(jobs, original_sequence, common_due_date)[0] < total_cost(jobs, sequence, common_due_date)[0]:    # Check whether original solution before move is better
-        return(original_sequence)
-    else:
-        return sequence
+    return sequence
 
 # ==================================================================
 #                  ITERATED LOCAL SEARCH
@@ -248,13 +321,13 @@ def iterated_local_search(jobs, common_due_date, initial_sequence, threshold_swa
     iter_count = 0
     tabu = [job_index]
 
-    sequence = initial_sequence[:]
     while iter_no_improv < stop_iter:
+        sequence = best_sequence[:]     # This step guarantees no worse solution will be taken as best_sequence is only updated if total_cost
         sequence = local_search(jobs, sequence, common_due_date, job_index, threshold_swaps, threshold_inserts, insert_probability)
-        new_total_cost = total_cost(jobs, sequence, common_due_date)
-        if new_total_cost[0] < best_cost:
+        new_total_cost = total_cost(jobs, initial_sequence, common_due_date)[0]
+        if new_total_cost < best_cost:
             best_sequence = sequence[:]
-            best_cost = new_total_cost[0]
+            best_cost = new_total_cost
             iter_no_improv = 0
         else:
             iter_no_improv += 1
