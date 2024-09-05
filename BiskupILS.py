@@ -364,8 +364,6 @@ def tabu_perturbation(jobs, A, B, common_due_date, tabu_parameters, threshold_in
         gamma = gamma_swaps
 
     improved = False
-    A_best = []
-    B_best = []
 
     sequence = A + B
 
@@ -382,44 +380,37 @@ def tabu_perturbation(jobs, A, B, common_due_date, tabu_parameters, threshold_in
                     move.append(j)
                     if move[0] < best_cost:     # if improved, ignore tabu list, just do the move
                         improved = True
-                        A_best = A[:]
-                        B_best = B[:]
-                        best_cost = total_cost(jobs, A_best, B_best)
-                        if j in tabu_list:      # it's possible that the move is already in the tabu list, in which case we remove the element and put it in first
-                            tabu_list.pop(tabu_list.index(j))
-                        tabu_list.append(j)
+                        best_cost = move[0]
                         moves.append(move)
                     else:
-                        if  j not in tabu_list:
+                        if j not in tabu_list:
                             moves.append(move)
-                    
+
                 else:
                     move = evaluation_procedure(jobs, A, B, candidates, j, False, True)
                     move.append(j)
                     if move[0] < best_cost:     # if improved, ignore tabu list, just do the move
                         improved = True
-                        A_best = A[:]
-                        B_best = B[:]
-                        best_cost = total_cost(jobs, A_best, B_best)
-                        if j in tabu_list:      # it's possible that the move is already in the tabu list, in which case we remove the element and put it in first
-                            tabu_list.pop(tabu_list.index(j))
-                        tabu_list.append(j)
+                        best_cost = move[0]
                         moves.append(move)
                     else:
-                        if  j not in tabu_list:
+                        if j not in tabu_list:
                             moves.append(move)
 
-        # Perform move that minimizes cost degradation, even if it  worsens the cost
+        # Perform move that minimizes cost degradation, even if it worsens the cost
         if len(moves) > 0:
             move = min(moves, key=lambda x: x[0])
             if insert:
                 A, B = insert_job(A, B, move[3], move[2])
             else:
                 A, B = swap_job(A, B, move[3], move[2])
-            tabu_list.append(move[3])
-
-    if improved:
-        A, B = A_best, B_best
+            
+            if improved:
+                j = move[3]
+                if j in tabu_list:      # it's possible that the element is already in the tabu list, in which case we remove the element and put it in first
+                    tabu_list.pop(tabu_list.index(j))
+                    tabu_list.append(j)
+            else: tabu_list.append(move[3])
 
     return A, B, improved
 
